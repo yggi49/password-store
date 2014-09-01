@@ -17,6 +17,9 @@ password=$(printf '%s\n' "${password_files[@]}" | dmenu "$@")
 
 [[ -n $password ]] || exit
 
+keychain_file=$HOME'/.keychain/'$(hostname)'-sh-gpg'
+[[ -f $keychain_file ]] && source $keychain_file
+
 if [[ $typeit -eq 0 ]]; then
 	pass show -c "$password" 2>/dev/null
 else
