@@ -282,8 +282,8 @@ cmd_usage() {
 	        List passwords.
 	    $PROGRAM find pass-names...
 	    	List passwords that match pass-names.
-	    $PROGRAM [show] [--clip[=line-number],-c[line-number]] pass-name
-	        Show existing password and optionally put it on the clipboard.
+	    $PROGRAM [show] [--clip[=line-number],-c[line-number]] [--qrcode[=line-number],-q[line-number]] pass-name
+	        Show existing password and optionally put it on the clipboard or display as QR code in the terminal.
 	        If put on the clipboard, it will be cleared in $CLIP_TIME seconds.
 	    $PROGRAM grep [GREPOPTIONS] search-string
 	        Search for password files containing search-string when decrypted.
@@ -293,9 +293,9 @@ cmd_usage() {
 	        overwriting existing password unless forced.
 	    $PROGRAM edit pass-name
 	        Insert a new password or edit an existing password using ${EDITOR:-vi}.
-	    $PROGRAM generate [--no-symbols,-n] [--clip,-c] [--in-place,-i | --force,-f] pass-name [pass-length]
+	    $PROGRAM generate [--no-symbols,-n] [--clip,-c] [--qrcode,-q] [--in-place,-i | --force,-f] pass-name [pass-length]
 	        Generate a new password of pass-length (or $GENERATED_LENGTH if unspecified) with optionally no symbols.
-	        Optionally put it on the clipboard and clear board after $CLIP_TIME seconds.
+	        Optionally put it on the clipboard and clear board after $CLIP_TIME seconds, or display as QR code in the terminal.
 	        Prompt before overwriting existing password unless forced.
 	        Optionally replace only the first line of an existing file with a new password.
 	    $PROGRAM rm [--recursive,-r] [--force,-f] pass-name
