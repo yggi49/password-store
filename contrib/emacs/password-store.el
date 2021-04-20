@@ -1,11 +1,12 @@
 ;;; password-store.el --- Password store (pass) support
 
-;; Copyright (C) 2014 Svend Sorensen <svend@ciffer.net>
+;; Copyright (C) 2014-2017 Svend Sorensen <svend@svends.net>
 
-;; Author: Svend Sorensen <svend@ciffer.net>
-;; Version: 0.1
-;; Package-Requires: ((dash "1.5.0") (f "0.11.0") (s "1.9.0"))
-;; Keywords: pass
+;; Author: Svend Sorensen <svend@svends.net>
+;; Version: 1.0.1
+;; URL: https://www.passwordstore.org/
+;; Package-Requires: ((emacs "24") (f "0.11.0") (s "1.9.0") (with-editor "2.5.11"))
+;; Keywords: tools pass password password-store
 
 ;; This file is not part of GNU Emacs.
 
@@ -31,16 +32,26 @@
 
 ;;; Code:
 
-(require 'dash)
 (require 'f)
 (require 's)
+(require 'with-editor)
+
+(defgroup password-store '()
+  "Emacs mode for password-store."
+  :prefix "password-store-"
+  :group 'password-store)
+
+(defcustom password-store-password-length 8
+  "Default password length."
+  :group 'password-store
+  :type 'number)
 
 (defvar password-store-executable
   (executable-find "pass")
   "Pass executable.")
 
-(defconst password-store-password-length 8
-  "Default password length.")
+(defvar password-store-timeout-timer nil
+  "Timer for clearing clipboard.")
 
 (defun password-store-timeout ()
   "Number of seconds to wait before clearing the password."
@@ -54,14 +65,29 @@
 Nil arguments are ignored.  Returns the output on success, or
 outputs error message on failure."
   (with-temp-buffer
-    (let ((exit-code
-	   (apply 'call-process
-		  (append
-		   (list password-store-executable nil (current-buffer) nil)
-		   (-reject 'null args)))))
+    (let* ((tempfile (make-temp-file ""))
+           (exit-code
+            (apply 'call-process
+                   (append
+                    (list password-store-executable nil (list t tempfile) nil)
+                    (delq nil args)))))
+      (unless (zerop exit-code)
+        (erase-buffer)
+        (insert-file-contents tempfile))
+      (delete-file tempfile)
       (if (zerop exit-code)
-	  (s-chomp (buffer-string))
-	(error (s-chomp (buffer-string)))))))
+          (s-chomp (buffer-string))
+        (error (s-chomp (buffer-string)))))))
+
+(defun password-store--run-async (&rest args)
+  "Run pass asynchronously with ARGS.
+
+Nil arguments are ignored."
+  (let ((args (mapcar #'shell-quote-argument args)))
+    (with-editor-async-shell-command
+     (mapconcat 'identity
+                (cons password-store-executable
+                      (delq nil args)) " "))))
 
 (defun password-store--run-init (gpg-ids &optional folder)
   (apply 'password-store--run "init"
@@ -85,7 +111,8 @@ outputs error message on failure."
   (error "Not implemented"))
 
 (defun password-store--run-edit (entry)
-  (error "Not implemented"))
+  (password-store--run-async "edit"
+                             entry))
 
 (defun password-store--run-generate (entry password-length &optional force no-symbols)
   (password-store--run "generate"
@@ -144,17 +171,14 @@ outputs error message on failure."
   (unless subdir (setq subdir ""))
   (let ((dir (f-join (password-store-dir) subdir)))
     (if (f-directory? dir)
-	(mapcar 'password-store--file-to-entry
-		(f-files dir (lambda (file) (equal (f-ext file) "gpg")) t)))))
+        (mapcar 'password-store--file-to-entry
+                (f-files dir (lambda (file) (equal (f-ext file) "gpg")) t)))))
 
 ;;;###autoload
 (defun password-store-edit (entry)
-  "Edit password for ENTRY.
-
-This edits the password file directly in Emacs, so changes will
-need to be commited manually if git is being used."
+  "Edit password for ENTRY."
   (interactive (list (password-store--completing-read)))
-  (find-file (password-store--entry-to-file entry)))
+  (password-store--run-edit entry))
 
 ;;;###autoload
 (defun password-store-get (entry)
@@ -167,6 +191,9 @@ Returns the first line of the password data."
 (defun password-store-clear ()
   "Clear password in kill ring."
   (interactive)
+  (when password-store-timeout-timer
+    (cancel-timer password-store-timeout-timer)
+    (setq password-store-timeout-timer nil))
   (when password-store-kill-ring-pointer
     (setcar password-store-kill-ring-pointer "")
     (setq password-store-kill-ring-pointer nil)
@@ -185,7 +212,8 @@ after `password-store-timeout' seconds."
     (kill-new password)
     (setq password-store-kill-ring-pointer kill-ring-yank-pointer)
     (message "Copied %s to the kill ring. Will clear in %s seconds." entry (password-store-timeout))
-    (run-at-time (password-store-timeout) nil 'password-store-clear)))
+    (setq password-store-timeout-timer
+          (run-at-time (password-store-timeout) nil 'password-store-clear))))
 
 ;;;###autoload
 (defun password-store-init (gpg-id)
@@ -193,14 +221,18 @@ after `password-store-timeout' seconds."
 
 Separate multiple IDs with spaces."
   (interactive (list (read-string "GPG ID: ")))
-  (message (password-store--run-init (split-string gpg-id))))
+  (message "%s" (password-store--run-init (split-string gpg-id))))
 
 ;;;###autoload
 (defun password-store-insert (entry password)
   "Insert a new ENTRY containing PASSWORD."
   (interactive (list (read-string "Password entry: ")
-		     (read-passwd "Password: " t)))
-  (message (shell-command-to-string (format "echo %s | %s insert -m -f %s" password password-store-executable entry))))
+                     (read-passwd "Password: " t)))
+  (message "%s" (shell-command-to-string
+                 (format "echo %s | %s insert -m -f %s"
+                         (shell-quote-argument password)
+                         password-store-executable
+                         (shell-quote-argument entry)))))
 
 ;;;###autoload
 (defun password-store-generate (entry &optional password-length)
@@ -208,8 +240,8 @@ Separate multiple IDs with spaces."
 
 Default PASSWORD-LENGTH is `password-store-password-length'."
   (interactive (list (read-string "Password entry: ")
-		     (when current-prefix-arg
-		       (abs (prefix-numeric-value current-prefix-arg)))))
+                     (when current-prefix-arg
+                       (abs (prefix-numeric-value current-prefix-arg)))))
   (unless password-length (setq password-length password-store-password-length))
   ;; A message with the output of the command is not printed because
   ;; the output contains the password.
@@ -220,20 +252,20 @@ Default PASSWORD-LENGTH is `password-store-password-length'."
 (defun password-store-remove (entry)
   "Remove existing password for ENTRY."
   (interactive (list (password-store--completing-read)))
-  (message (password-store--run-remove entry t)))
+  (message "%s" (password-store--run-remove entry t)))
 
 ;;;###autoload
 (defun password-store-rename (entry new-entry)
   "Rename ENTRY to NEW-ENTRY."
   (interactive (list (password-store--completing-read)
                      (read-string "Rename entry to: ")))
-  (message (password-store--run-rename entry new-entry t)))
+  (message "%s" (password-store--run-rename entry new-entry t)))
 
 ;;;###autoload
 (defun password-store-version ()
   "Show version of pass executable."
   (interactive)
-  (message (password-store--run-version)))
+  (message "%s" (password-store--run-version)))
 
 ;;;###autoload
 (defun password-store-url (entry)
@@ -244,8 +276,8 @@ avoid sending a password to the browser."
   (interactive (list (password-store--completing-read)))
   (let ((url (password-store-get entry)))
     (if (or (string-prefix-p "http://" url)
-	    (string-prefix-p "https://" url))
-	(browse-url url)
+            (string-prefix-p "https://" url))
+        (browse-url url)
       (error "%s" "String does not look like a URL"))))
 
 (provide 'password-store)
