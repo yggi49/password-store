@@ -383,8 +383,8 @@ cmd_show() {
 			fi
 			if [[ $meta -eq 1 ]]; then
 				tail="$($GPG -d "${GPG_OPTS[@]}" "$passfile" | tail -n +2 | $BASE64)" || exit $?
-                echo "$tail" | $BASE64 -d
-                unset -v tail
+				echo "$tail" | $BASE64 -d
+				unset -v tail
 			fi
 		fi
 	elif [[ -d $PREFIX/$path ]]; then
